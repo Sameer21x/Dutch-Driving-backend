@@ -13,7 +13,7 @@ const app = express();
 app.use(express.json()); // To parse JSON request bodies
 // Configure CORS to allow specific origin
 app.use(cors({
-  origin: ['https://dutch-driving-backend.vercel.app','http://localhost:3001']
+  origin: ['https://dutch-driving-backend.vercel.app','http://localhost:3001','https://dutch-driving.vercel.app']
 }));
 // Database connection
 mongoose.connect(process.env.MONGO_URI, {
