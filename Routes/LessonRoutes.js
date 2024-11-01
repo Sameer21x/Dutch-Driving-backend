@@ -11,6 +11,7 @@ router.use((req, res, next) => {
 // Lesson Routes
 router.get('/', lessonController.getAllLessons); // Fetch all lessons
 router.get('/:lessonId/questions', lessonController.getLessonQuestions); // Fetch questions for a specific lesson
-router.post('/progress', lessonController.updateLessonProgress); // Update user's lesson progress
+router.post('/progress', lessonController.updateLessonProgress);
+router.get('/progress', lessonController.getUserProgressAndNextQuestion);
 
 module.exports = router;

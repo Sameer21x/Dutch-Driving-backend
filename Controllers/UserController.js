@@ -67,18 +67,22 @@ async function signUpUser(req, res) {
             password: hash,
             emailAddress: req.body.emailAddress,
             otp,
-            isVerified: false
+            isVerified: false,
+            paymentActive: false
         });
 
         const savedUser = await user.save();
         const messageId = await sendOTPEmail(savedUser.emailAddress, otp);
 
-        const token = jwt.sign({ userId: savedUser._id, email: savedUser.emailAddress }, process.env.JWT_SECRET, { expiresIn: '1h' });
+        const token = jwt.sign({
+            userId: savedUser._id, email: savedUser.emailAddress, paymentActive: savedUser.paymentActive,
+            isVerified: savedUser.isVerified
+        }, process.env.JWT_SECRET, { expiresIn: '1h' });
 
         res.status(201).json({
             message: 'User created successfully, OTP sent to email',
             token: `Bearer ${token}`,
-            emailMessageId: messageId 
+            emailMessageId: messageId
         });
     } catch (error) {
         // Existing error handling...
@@ -162,11 +166,12 @@ function generateOTP() {
 }
 
 // Login User
+
 function loginUser(req, res) {
     const { emailAddress, password } = req.body;
 
     // Get the user's IP address and user-agent (device info)
-    const userIP = req.ip; 
+    const userIP = req.ip;
     const userAgent = req.headers['user-agent'];
 
     User.findOne({ emailAddress }).then(user => {
@@ -180,20 +185,20 @@ function loginUser(req, res) {
         }
 
         // Compare password
-        bcryptjs.compare(password, user.password, function(err, result) {
+        bcryptjs.compare(password, user.password, function (err, result) {
             if (!result) {
                 return res.status(401).json({ message: "Invalid credentials!" });
             }
 
-            // Check if it's a new IP or device (user-agent) or if user is not verified
+            // Check if it's a new IP or device or if the user is not verified
             const isNewDeviceOrIP = user.lastKnownIP !== userIP || user.lastKnownDevice !== userAgent;
             if (isNewDeviceOrIP || !user.isVerified) {
-                // New device/IP or unverified user - send OTP
+                // Send OTP if new IP, device, or unverified user
                 const otp = generateOTP(); // Assuming you have a function for this
                 user.otp = otp;
                 sendOTPEmail(user.emailAddress, otp)
                     .then(() => {
-                        // Save IP, device, OTP, and set isVerified to false to require verification
+                        // Update IP, device info, and mark as unverified
                         user.lastKnownIP = userIP;
                         user.lastKnownDevice = userAgent;
                         user.isVerified = false;
@@ -208,18 +213,22 @@ function loginUser(req, res) {
                         res.status(500).json({ message: "Error sending OTP", error: err });
                     });
             } else {
-                // Regular login, no OTP required
-                const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+                // Regular login without OTP
+                const token = jwt.sign({
+                    userId: user._id,
+                    paymentActive: user.paymentActive,
+                    isVerified: user.isVerified
+                }, process.env.JWT_SECRET, { expiresIn: '1h' });
 
-                // Update last known IP and device
+                // Update last known IP and device, and set isVerified to true
                 user.lastKnownIP = userIP;
                 user.lastKnownDevice = userAgent;
-                user.isVerified = true; // Mark user as verified for future logins
+                user.isVerified = true;
                 user.save().then(() => {
                     return res.status(200).json({
                         message: "Login successful!",
                         token: `Bearer ${token}`,
-                        otpRequired: false
+                        otpRequired: false // No OTP needed for familiar IP/device
                     });
                 });
             }
@@ -228,6 +237,8 @@ function loginUser(req, res) {
         res.status(500).json({ message: "Something went wrong", error: err });
     });
 }
+
+
 
 // Verify OTP
 function verifyOTP(req, res) {
@@ -419,4 +430,3 @@ module.exports = {
     deleteUserAccount,
     contactUs
 };
-  

@@ -4,6 +4,7 @@ const LessonProgress = require('../Models/LessonProgress');
 
 
 
+
 // Controller function to get all lessons
 async function getAllLessons(req, res) {
     try {
@@ -74,10 +75,51 @@ async function updateLessonProgress(req, res) {
     }
 }
 
+// Controller function to get user's completed questions and the next question to answer
+async function getUserProgressAndNextQuestion(req, res) {
+    const { userId, lessonId } = req.query;
+
+    try {
+        // Find the user's progress for this lesson
+        const progress = await LessonProgress.findOne({ userId, lessonId });
+
+        // Find all questions for this lesson
+        const questions = await LessonQuestion.find({ lessonId }).sort('questionNumber');
+
+        let completedQuestions = [];
+        let nextQuestion = null;
+
+        if (progress) {
+            completedQuestions = questions.slice(0, progress.completedQuestions);
+            nextQuestion = questions[progress.completedQuestions];
+        } else {
+            // If no progress found, start from the first question
+            nextQuestion = questions[0];
+        }
+
+        res.status(200).json({
+            message: 'User progress and next question retrieved successfully',
+            completedQuestions,
+            nextQuestion,
+            totalQuestions: questions.length
+        });
+    } catch (error) {
+        res.status(500).json({
+            message: 'Error fetching user progress and next question',
+            error: error.message
+        });
+    }
+}
+
+
+
+
+
 
 
 module.exports = {
     getAllLessons,
     getLessonQuestions,
-    updateLessonProgress
+    updateLessonProgress,
+    getUserProgressAndNextQuestion
 }
