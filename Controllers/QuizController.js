@@ -13,13 +13,9 @@ async function getQuizQuestions(req, res) {
             return res.status(404).json({ message: `No questions found for section ${section}` });
         }
 
-        // Send the quiz questions for that section
         res.status(200).json({
             message: `Quiz questions for section ${section} retrieved successfully`,
-            // totalQuestions: quiz.questions.length,
-            // questions: quiz._id
-            quiz,
-            questions:quiz.questions._id
+            quiz: quiz.toObject() // Ensure all fields, including _id, are preserved
         });
     } catch (error) {
         res.status(500).json({
@@ -28,6 +24,12 @@ async function getQuizQuestions(req, res) {
         });
     }
 }
+
+
+
+
+
+
 
 // Controller function to submit quiz answers for a specific section
 async function submitQuizAnswers(req, res) {
@@ -39,24 +41,42 @@ async function submitQuizAnswers(req, res) {
         const quiz = await Quiz.findOne({ section: section });
 
         // Check if the quiz exists and has questions
-        if (!quiz || !quiz.questions || quiz.questions.length === 0) {
+        if (!quiz) {
+            console.error(`No quiz found for section ${section}`);
+            return res.status(404).json({ message: `No quiz found for section ${section}` });
+        }
+        if (!quiz.questions || quiz.questions.length === 0) {
+            console.error(`No questions found in quiz for section ${section}`);
             return res.status(404).json({ message: `No questions found for section ${section}` });
         }
+
+        console.log(`Quiz for section ${section} fetched successfully with ${quiz.questions.length} questions.`);
 
         let correctAnswers = 0;
         const totalQuestions = quiz.questions.length;
 
         // Loop through the user's answers and match with the correct answers
-        answers.forEach((userAnswer) => {
-            // Access the question using the index from the userAnswer
-            const questionIndex = parseInt(userAnswer._id.replace('qA', '')) - 1; // Assuming question IDs are like 'qA1', 'qA2', etc.
-            const question = quiz.questions[questionIndex];
+        answers.forEach((userAnswer, index) => {
+            // Check if userAnswer._id matches expected format (e.g., "qB1", "qC2")
+            if (!userAnswer._id || !/^q[A-Z]\d+$/.test(userAnswer._id)) {
+                console.error(`Invalid question ID format: ${userAnswer._id}`);
+                return; // Skip this answer if the format is incorrect
+            }
 
-            console.log(question, "questions printed here");
+            // Calculate the question index based on the user's answer ID format
+            const questionIndex = parseInt(userAnswer._id.replace(`q${section}`, '')) - 1;
+
+            // Check if questionIndex is valid
+            if (isNaN(questionIndex) || questionIndex < 0 || questionIndex >= quiz.questions.length) {
+                console.error(`Invalid question index: ${questionIndex} for section ${section}`);
+                return;
+            }
+
+            const question = quiz.questions[questionIndex];
+            console.log(`Processing question:`, question);
 
             if (question) {
                 const correctOption = question.answerOptions.find(option => option.isCorrect);
-
                 console.log(`Checking question ID: ${question._id}`);
                 console.log(`User selected option: ${userAnswer.selectedOption}`);
                 console.log(`Correct option: ${correctOption ? correctOption.optionText : 'None'}`);
@@ -65,6 +85,8 @@ async function submitQuizAnswers(req, res) {
                 if (correctOption && correctOption.optionText === userAnswer.selectedOption) {
                     correctAnswers++;
                 }
+            } else {
+                console.error(`Question not found at index ${questionIndex} for section ${section}`);
             }
         });
 
