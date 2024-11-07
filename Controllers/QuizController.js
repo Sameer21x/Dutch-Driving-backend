@@ -57,16 +57,13 @@ async function submitQuizAnswers(req, res) {
 
         // Loop through the user's answers and match with the correct answers
         answers.forEach((userAnswer, index) => {
-            // Check if userAnswer._id matches expected format (e.g., "qB1", "qC2")
             if (!userAnswer._id || !/^q[A-Z]\d+$/.test(userAnswer._id)) {
                 console.error(`Invalid question ID format: ${userAnswer._id}`);
-                return; // Skip this answer if the format is incorrect
+                return;
             }
 
-            // Calculate the question index based on the user's answer ID format
             const questionIndex = parseInt(userAnswer._id.replace(`q${section}`, '')) - 1;
 
-            // Check if questionIndex is valid
             if (isNaN(questionIndex) || questionIndex < 0 || questionIndex >= quiz.questions.length) {
                 console.error(`Invalid question index: ${questionIndex} for section ${section}`);
                 return;
@@ -81,7 +78,6 @@ async function submitQuizAnswers(req, res) {
                 console.log(`User selected option: ${userAnswer.selectedOption}`);
                 console.log(`Correct option: ${correctOption ? correctOption.optionText : 'None'}`);
 
-                // Compare the user's selected option with the correct option
                 if (correctOption && correctOption.optionText === userAnswer.selectedOption) {
                     correctAnswers++;
                 }
@@ -91,16 +87,21 @@ async function submitQuizAnswers(req, res) {
         });
 
         // Define passing criteria based on section
-        const passingCriteria = { A: 1, B: 1, C: 1 }; // Adjust these values as needed
+        const passingCriteria = { A: 1, B: 1, C: 1 };
         const passed = correctAnswers >= passingCriteria[section];
 
         // Calculate the score percentage
         const score = Math.round((correctAnswers / totalQuestions) * 100);
 
-        // Save the quiz result
+        // Get the highest attempt number for the user in the given section
+        const previousAttempts = await QuizResult.find({ userId, section }).sort({ attempt: -1 }).limit(1);
+        const attempt = previousAttempts.length > 0 ? previousAttempts[0].attempt + 1 : 1;
+
+        // Save the quiz result with the new attempt number
         const quizResult = new QuizResult({
             userId,
             section,
+            attempt,
             correctAnswers,
             totalQuestions,
             score,
@@ -115,13 +116,14 @@ async function submitQuizAnswers(req, res) {
             result: quizResult,
         });
     } catch (error) {
-        console.error('Error in submitQuizAnswers:', error); // Log the error for debugging
+        console.error('Error in submitQuizAnswers:', error);
         res.status(500).json({
             message: 'Error submitting quiz',
             error,
         });
     }
 }
+
 
 
 
@@ -149,6 +151,7 @@ async function getQuizResults(req, res) {
         });
     }
 }
+
 
 module.exports = {
     getQuizQuestions,
