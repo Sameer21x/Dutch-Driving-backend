@@ -3,6 +3,14 @@ const bcryptjs = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const mongoose = require('mongoose');
+const dotenv = require('dotenv');
+require('dotenv').config(); // Load environment variables at the top
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+
+console.log("Stripe Secret Key:", process.env.STRIPE_SECRET_KEY);
+
+
+dotenv.config();
 
 
 
@@ -106,57 +114,84 @@ async function updateMembershipPlan(req, res) {
             return res.status(404).json({ message: 'User not found.' });
         }
 
-        // Calculate the cost and end date based on the plan type
+        // Calculate the cost, end date, and days based on the plan type
         const planDetails = calculateMembershipPlan(membershipPlanType);
 
-        // Update the user's membership plan
-        user.membershipPlan = {
-            planType: membershipPlanType,
-            cost: planDetails.cost,
-            startDate: new Date(),
-            endDate: planDetails.endDate
-        };
+        // Convert the cost to cents (Stripe expects the amount in cents)
+        const unitAmount = Math.round(planDetails.cost * 100); // 19.99 becomes 1999 cents
 
-        // Set paymentActive to true upon plan update
-        user.paymentActive = true;
+        // Create a Stripe Checkout session
+        const session = await stripe.checkout.sessions.create({
+            payment_method_types: ['card'],
+            line_items: [
+              {
+                price_data: {
+                  currency: 'usd',
+                  product_data: {
+                    name: `Membership Plan - ${membershipPlanType}`,
+                  },
+                  unit_amount: unitAmount, // Use the dynamically calculated amount
+                },
+                quantity: 1,
+              },
+            ],
+            mode: 'payment',
+            success_url: 'https://example.com/placeholder',  // temporary placeholder
+            cancel_url: 'https://example.com/placeholder',  // temporary placeholder
+          });
+          
+        // Retrieve the session URL for checkout
+        const checkoutUrl = session.url;
+        console.log("Checkout URL:", checkoutUrl);
 
-        // Save the updated user
-        const updatedUser = await user.save();
-
+        // Return the session URL and the number of days in the response
         res.status(200).json({
-            message: 'Membership plan updated successfully',
-            membershipPlan: updatedUser.membershipPlan
+            message: 'Membership plan updated successfully. Redirecting to Stripe...',
+            checkoutUrl: session.url,
+            days: planDetails.days  // Return the calculated days
         });
     } catch (error) {
         res.status(500).json({ message: 'Something went wrong', error });
     }
 }
-
-
 // Helper function to calculate membership plan details based on type
 function calculateMembershipPlan(planType) {
-    let cost, endDate;
-    const startDate = new Date();
+    let cost, endDate, days;
+    const startDate = new Date(); // Current date
 
+    // Assume 30 days per month for simplicity
+    const fixedMonthLength = 30;
+
+    // Create end date based on plan duration
     switch (planType) {
         case '1month':
             cost = 19.99;
-            endDate = new Date(startDate.setMonth(startDate.getMonth() + 1));
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + fixedMonthLength); // 30 days later
             break;
         case '3months':
             cost = 14.99;
-            endDate = new Date(startDate.setMonth(startDate.getMonth() + 3));
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + fixedMonthLength * 3); // 90 days later
             break;
         case '6months':
             cost = 9.99;
-            endDate = new Date(startDate.setMonth(startDate.getMonth() + 6));
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + fixedMonthLength * 6); // 180 days later
             break;
         default:
             throw new Error('Invalid membership plan type');
     }
 
-    return { cost, endDate };
+    // Calculate the number of days between the start and end date
+    days = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
+
+    return { cost, endDate, days }; // Return the number of days
 }
+
+
+
+
 
 
 
