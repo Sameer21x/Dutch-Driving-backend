@@ -6,8 +6,10 @@ const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 require('dotenv').config(); // Load environment variables at the top
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const blacklist = new Set();
+const imagekit = require('../config/imagekit');
 
-console.log("Stripe Secret Key:", process.env.STRIPE_SECRET_KEY);
+
 
 
 dotenv.config();
@@ -97,111 +99,7 @@ async function signUpUser(req, res) {
     }
 }
 
-
-
-async function updateMembershipPlan(req, res) {
-    const { userId, membershipPlanType } = req.body;
-
-    if (!userId || !membershipPlanType) {
-        return res.status(400).json({ message: 'User ID and membership plan type are required.' });
-    }
-
-    try {
-        // Find the user by their ID
-        const user = await User.findById(userId);
-
-        if (!user) {
-            return res.status(404).json({ message: 'User not found.' });
-        }
-
-        // Calculate the cost, end date, and days based on the plan type
-        const planDetails = calculateMembershipPlan(membershipPlanType);
-
-        // Convert the cost to cents (Stripe expects the amount in cents)
-        const unitAmount = Math.round(planDetails.cost * 100); // 19.99 becomes 1999 cents
-
-        // Create a Stripe Checkout session
-        const session = await stripe.checkout.sessions.create({
-            payment_method_types: ['card'],
-            line_items: [
-              {
-                price_data: {
-                  currency: 'usd',
-                  product_data: {
-                    name: `Membership Plan - ${membershipPlanType}`,
-                  },
-                  unit_amount: unitAmount, // Use the dynamically calculated amount
-                },
-                quantity: 1,
-              },
-            ],
-            mode: 'payment',
-            success_url: 'https://example.com/placeholder',  // temporary placeholder
-            cancel_url: 'https://example.com/placeholder',  // temporary placeholder
-          });
-          
-        // Retrieve the session URL for checkout
-        const checkoutUrl = session.url;
-        console.log("Checkout URL:", checkoutUrl);
-
-        // Return the session URL and the number of days in the response
-        res.status(200).json({
-            message: 'Membership plan updated successfully. Redirecting to Stripe...',
-            checkoutUrl: session.url,
-            days: planDetails.days  // Return the calculated days
-        });
-    } catch (error) {
-        res.status(500).json({ message: 'Something went wrong', error });
-    }
-}
-// Helper function to calculate membership plan details based on type
-function calculateMembershipPlan(planType) {
-    let cost, endDate, days;
-    const startDate = new Date(); // Current date
-
-    // Assume 30 days per month for simplicity
-    const fixedMonthLength = 30;
-
-    // Create end date based on plan duration
-    switch (planType) {
-        case '1month':
-            cost = 19.99;
-            endDate = new Date(startDate);
-            endDate.setDate(startDate.getDate() + fixedMonthLength); // 30 days later
-            break;
-        case '3months':
-            cost = 14.99;
-            endDate = new Date(startDate);
-            endDate.setDate(startDate.getDate() + fixedMonthLength * 3); // 90 days later
-            break;
-        case '6months':
-            cost = 9.99;
-            endDate = new Date(startDate);
-            endDate.setDate(startDate.getDate() + fixedMonthLength * 6); // 180 days later
-            break;
-        default:
-            throw new Error('Invalid membership plan type');
-    }
-
-    // Calculate the number of days between the start and end date
-    days = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
-
-    return { cost, endDate, days }; // Return the number of days
-}
-
-
-
-
-
-
-
-// Function to generate a random 6-digit OTP
-function generateOTP() {
-    return Math.floor(1000 + Math.random() * 9000).toString();
-}
-
 // Login User
-
 function loginUser(req, res) {
     const { emailAddress, password } = req.body;
 
@@ -273,7 +171,132 @@ function loginUser(req, res) {
     });
 }
 
+async function updateMembershipPlan(req, res) {
+    const { userId, membershipPlanType } = req.body;
 
+    if (!userId || !membershipPlanType) {
+        return res.status(400).json({ message: 'User ID and membership plan type are required.' });
+    }
+
+    try {
+        // Find the user by their ID
+        const user = await User.findById(userId);
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found.' });
+        }
+
+        // Calculate the membership plan details
+        const planDetails = calculateMembershipPlan(membershipPlanType);
+
+        // Convert the cost to cents (Stripe expects the amount in cents)
+        const unitAmount = Math.round(planDetails.cost * 100);
+
+        // Create a Stripe Checkout session
+        const session = await stripe.checkout.sessions.create({
+            payment_method_types: ['card'],
+            line_items: [
+                {
+                    price_data: {
+                        currency: 'usd',
+                        product_data: {
+                            name: `Membership Plan - ${membershipPlanType}`,
+                        },
+                        unit_amount: unitAmount,
+                    },
+                    quantity: 1,
+                },
+            ],
+            mode: 'payment',
+            success_url: "http://localhost:3001/userprofile", // Adjust the success URL
+            cancel_url: "http://localhost:3001/paymentfailed", // Adjust the cancel URL
+            metadata: {
+                userId: user._id.toString(),
+                membershipPlanType: membershipPlanType,
+            },
+        });
+
+        // Save the checkout session ID to track payment later
+        user.stripeSessionId = session.id;
+        await user.save();
+
+        res.status(200).json({
+            message: 'Redirecting to payment gateway...',
+            checkoutUrl: session.url,
+        });
+
+    } catch (error) {
+        console.error('Error creating membership plan:', error);
+        res.status(500).json({ message: 'Internal server error', error });
+    }
+}
+
+// Stripe webhook to handle successful payment
+async function handlePaymentWebhook(event) {
+    try {
+        if (event.type === 'checkout.session.completed') {
+            const session = event.data.object;
+
+            // Get user ID and membership plan type from metadata
+            const userId = session.metadata.userId;
+            const membershipPlanType = session.metadata.membershipPlanType;
+
+            // Find the user and update their payment status and membership plan
+            const user = await User.findById(userId);
+            if (user) {
+                const planDetails = calculateMembershipPlan(membershipPlanType);
+                user.paymentActive = true;
+                user.membershipPlan = {
+                    planType: membershipPlanType,
+                    cost: planDetails.cost,
+                    startDate: new Date(),
+                    endDate: planDetails.endDate,
+                };
+
+                await user.save();
+                console.log('Membership plan updated successfully for user:', userId);
+            }
+        }
+    } catch (error) {
+        console.error('Error handling payment webhook:', error);
+    }
+}
+
+// Helper function to calculate membership plan details
+function calculateMembershipPlan(planType) {
+    let cost, endDate;
+    const startDate = new Date();
+    const fixedMonthLength = 30;
+
+    switch (planType) {
+        case '1month':
+            cost = 19.99;
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + fixedMonthLength);
+            break;
+        case '3months':
+            cost = 14.99 * 3; // Total cost for 3 months
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + fixedMonthLength * 3);
+            break;
+        case '6months':
+            cost = 9.99 * 6; // Total cost for 6 months
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + fixedMonthLength * 6);
+            break;
+        default:
+            throw new Error('Invalid membership plan type');
+    }
+
+    return { cost, endDate };
+}
+
+
+
+// Function to generate a random 6-digit OTP
+function generateOTP() {
+    return Math.floor(1000 + Math.random() * 9000).toString();
+}
 
 // Verify OTP
 function verifyOTP(req, res) {
@@ -395,14 +418,61 @@ async function deleteUserAccount(req, res) {
 
 
 
+async function logoutUser(req, res) {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ message: "No token provided." });
+        }
 
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
+        // Blacklist the token by storing its jti or full token
+        blacklist.add(token);
 
+        res.status(200).json({ message: "Successfully logged out." });
+    } catch (error) {
+        res.status(400).json({ message: "Invalid token.", error });
+    }
+}
 
+// Controller to upload and save profile picture
+const uploadProfilePic = async (req, res) => {
+    try {
+        const { userId } = req.body;
 
+        if (!userId || !req.file) {
+            return res.status(400).json({ message: 'User ID and image file are required.' });
+        }
 
+        const file = req.file.buffer; // Ensure you're using multer to handle file uploads
+        const fileName = `profile_${userId}_${Date.now()}.jpg`;
 
+        // Upload to ImageKit
+        const response = await imagekit.upload({
+            file,
+            fileName,
+            folder: '/Dutch-Driving-assets'
+        });
 
+        // Save URL in the database
+        const user = await User.findByIdAndUpdate(
+            userId,
+            { profilePic: response.url },
+            { new: true }
+        );
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found.' });
+        }
+
+        res.status(200).json({ message: 'Profile picture updated successfully.', profilePic: response.url });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Error uploading profile picture.', error });
+    }
+};
 
 async function contactUs(req, res) {
     const { emailAddress, name, message } = req.body;
@@ -458,10 +528,13 @@ async function contactUs(req, res) {
 module.exports = {
     signUpUser,
     loginUser,
+    logoutUser,
     verifyOTP,
     updateMembershipPlan,
+    handlePaymentWebhook,
     getUserDetails,
     updateUserAccount,
     deleteUserAccount,
-    contactUs
+    contactUs,
+    uploadProfilePic
 };
