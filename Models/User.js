@@ -30,7 +30,7 @@ const userSchema = new mongoose.Schema({
 userSchema.pre('save', function (next) {
   if (!this.isNew || this.memberId) return next(); // Skip if not new or already has memberId
 
-  const prefix = 'DM-'; // Prefix for the MemberId
+  const prefix = 'DM'; 
   const numericSuffix = Math.floor(1000 + Math.random() * 9000); // Generate a 4-digit random number
   this.memberId = `${prefix}${numericSuffix}`; // Combine prefix with numeric suffix
 

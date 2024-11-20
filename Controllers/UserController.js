@@ -171,7 +171,7 @@ function loginUser(req, res) {
     });
 }
 
-async function updateMembershipPlan(req, res) {
+const updateMembershipPlan = async (req, res) => {
     const { userId, membershipPlanType } = req.body;
 
     if (!userId || !membershipPlanType) {
@@ -189,7 +189,7 @@ async function updateMembershipPlan(req, res) {
         // Calculate the membership plan details
         const planDetails = calculateMembershipPlan(membershipPlanType);
 
-        // Convert the cost to cents (Stripe expects the amount in cents)
+        // Stripe expects the amount in cents
         const unitAmount = Math.round(planDetails.cost * 100);
 
         // Create a Stripe Checkout session
@@ -198,11 +198,11 @@ async function updateMembershipPlan(req, res) {
             line_items: [
                 {
                     price_data: {
-                        currency: 'usd',
+                        currency: 'eur', // Specify euros as the currency
                         product_data: {
                             name: `Membership Plan - ${membershipPlanType}`,
                         },
-                        unit_amount: unitAmount,
+                        unit_amount: unitAmount, // Amount in cents
                     },
                     quantity: 1,
                 },
@@ -216,20 +216,56 @@ async function updateMembershipPlan(req, res) {
             },
         });
 
-        // Save the checkout session ID to track payment later
+        // Save the checkout session ID and update membership details
         user.stripeSessionId = session.id;
+        user.membershipPlan = {
+            planType: membershipPlanType,
+            cost: planDetails.cost, // Keep cost in euros for display purposes
+            startDate: new Date(),
+            endDate: planDetails.endDate,
+        };
         await user.save();
 
         res.status(200).json({
             message: 'Redirecting to payment gateway...',
             checkoutUrl: session.url,
+            membershipDetails: user.membershipPlan, // Include membership details in the response
         });
-
     } catch (error) {
         console.error('Error creating membership plan:', error);
         res.status(500).json({ message: 'Internal server error', error });
     }
+};
+
+// Helper function to calculate membership plan details
+function calculateMembershipPlan(planType) {
+    let cost, endDate;
+    const startDate = new Date();
+    const fixedMonthLength = 30;
+
+    switch (planType) {
+        case '1month':
+            cost = 19.99;
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + fixedMonthLength);
+            break;
+        case '3months':
+            cost = 14.99;
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + fixedMonthLength * 3);
+            break;
+        case '6months':
+            cost = 9.99;
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + fixedMonthLength * 6);
+            break;
+        default:
+            throw new Error('Invalid membership plan type');
+    }
+
+    return { cost, endDate };
 }
+
 
 // Stripe webhook to handle successful payment
 async function handlePaymentWebhook(event) {
@@ -262,34 +298,34 @@ async function handlePaymentWebhook(event) {
     }
 }
 
-// Helper function to calculate membership plan details
-function calculateMembershipPlan(planType) {
-    let cost, endDate;
-    const startDate = new Date();
-    const fixedMonthLength = 30;
+// // Helper function to calculate membership plan details
+// function calculateMembershipPlan(planType) {
+//     let cost, endDate;
+//     const startDate = new Date();
+//     const fixedMonthLength = 30;
 
-    switch (planType) {
-        case '1month':
-            cost = 19.99;
-            endDate = new Date(startDate);
-            endDate.setDate(startDate.getDate() + fixedMonthLength);
-            break;
-        case '3months':
-            cost = 14.99 * 3; // Total cost for 3 months
-            endDate = new Date(startDate);
-            endDate.setDate(startDate.getDate() + fixedMonthLength * 3);
-            break;
-        case '6months':
-            cost = 9.99 * 6; // Total cost for 6 months
-            endDate = new Date(startDate);
-            endDate.setDate(startDate.getDate() + fixedMonthLength * 6);
-            break;
-        default:
-            throw new Error('Invalid membership plan type');
-    }
+//     switch (planType) {
+//         case '1month':
+//             cost = 19.99;
+//             endDate = new Date(startDate);
+//             endDate.setDate(startDate.getDate() + fixedMonthLength);
+//             break;
+//         case '3months':
+//             cost = 14.99 * 3; // Total cost for 3 months
+//             endDate = new Date(startDate);
+//             endDate.setDate(startDate.getDate() + fixedMonthLength * 3);
+//             break;
+//         case '6months':
+//             cost = 9.99 * 6; // Total cost for 6 months
+//             endDate = new Date(startDate);
+//             endDate.setDate(startDate.getDate() + fixedMonthLength * 6);
+//             break;
+//         default:
+//             throw new Error('Invalid membership plan type');
+//     }
 
-    return { cost, endDate };
-}
+//     return { cost, endDate };
+// }
 
 
 
