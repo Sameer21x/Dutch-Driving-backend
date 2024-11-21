@@ -511,11 +511,11 @@ const uploadProfilePic = async (req, res) => {
 };
 
 async function contactUs(req, res) {
-    const { emailAddress, name, message } = req.body;
+    const { emailAddress, name,memberId, message } = req.body;
 
     // Validate input fields
-    if (!emailAddress || !name || !message) {
-        return res.status(400).json({ message: 'Email, name, and message are required.' });
+    if (!emailAddress || !name || !memberId|| !message) {
+        return res.status(400).json({ message: 'Email, name, memberid and message are required.' });
     }
 
     try {
@@ -536,8 +536,8 @@ async function contactUs(req, res) {
         let mailOptions = {
             from: emailAddress, // Sender's email (user's email)
             to: "company@example.com", // Your company email or where the messages should go
-            subject: `Contact Us Query from ${name}`, // Subject line
-            text: `You have received a new message from ${name} (${emailAddress}):\n\n${message}`
+            subject: `Contact Us Query from ${name} ${memberId}`, // Subject line
+            text: `You have received a new message from ${name} and memberId is ${memberId} (${emailAddress}):\n\n${message}`
         };
 
         // Send the email
